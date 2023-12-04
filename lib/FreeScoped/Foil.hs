@@ -14,8 +14,11 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE DeriveAnyClass #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE DerivingStrategies #-}
 
-module FreeScoped.Foil (impl) where
+module FreeScoped.Foil where
 
 import Data.Bifunctor
 import Data.Bifunctor.TH (deriveBifunctor)
@@ -27,56 +30,51 @@ import System.Exit (exitFailure)
 import qualified Util.Syntax.Lambda as LC
 import qualified Util.IdInt as IdInt
 import qualified Util.Impl as LambdaImpl
+import Control.DeepSeq
+import GHC.Generics (Generic)
 
 type Id = Int
-type Label = Id
-type RawName = (Id, Label)
-type RawScope = Map Int Label
+type RawName = Id
+type RawScope = Set.IntSet
 
 data {- kind -} S
   = {- type -} VoidS
   -- | {- type -} Singleton
   -- | {- type -} List
 
-data Scope (n :: S) = UnsafeScope RawScope
-data Name (n :: S) = UnsafeName RawName
-data NameBinder (n :: S) (l :: S) =
+newtype Scope (n :: S) = UnsafeScope RawScope
+  deriving newtype NFData
+newtype Name (n :: S) = UnsafeName RawName
+  deriving newtype NFData
+newtype NameBinder (n :: S) (l :: S) =
   UnsafeNameBinder (Name l)
-
-ppName :: Name n -> String
-ppName (UnsafeName (id, name)) = show name
+    deriving newtype NFData
 
 emptyScope :: Scope VoidS
-emptyScope = UnsafeScope Map.empty
+emptyScope = UnsafeScope Set.empty
 
 extendScope :: NameBinder n l -> Scope n -> Scope l
-extendScope (UnsafeNameBinder (UnsafeName (id, name))) (UnsafeScope scope) =
-  UnsafeScope (Map.insert id name scope)
+extendScope (UnsafeNameBinder (UnsafeName id)) (UnsafeScope scope) =
+  UnsafeScope (Set.insert id scope)
 
-rawFreshName :: RawScope -> Label -> RawName
-rawFreshName scope labelToBind | Map.null scope = (0, labelToBind)
-                               | otherwise =
-                                  let (maxId, _) = Map.findMax scope
-                                    in (maxId + 1, labelToBind + (maxId + 1))
+rawFreshName :: RawScope -> RawName
+rawFreshName scope | Set.null scope = 0
+                   | otherwise = Set.findMax scope + 1
 
 withFreshBinder
   :: Scope n
-  -> Label
   -> (forall l. NameBinder n l -> r)
   -> r
-withFreshBinder (UnsafeScope scope) labelToBind cont =
+withFreshBinder (UnsafeScope scope) cont =
   cont binder
   where
-    binder = UnsafeNameBinder (UnsafeName (rawFreshName scope labelToBind))
+    binder = UnsafeNameBinder (UnsafeName (rawFreshName scope))
 
 nameOf :: NameBinder n l -> Name l
 nameOf (UnsafeNameBinder name) = name
 
-idOf :: Name l -> Id
-idOf (UnsafeName (id, _)) = id
-
 rawMember :: RawName -> RawScope -> Bool
-rawMember (i, x) s = Map.member i s
+rawMember i s = Set.member i s
 
 member :: Name l -> Scope n -> Bool
 member (UnsafeName name) (UnsafeScope s) = rawMember name s
@@ -85,17 +83,6 @@ data Expr n where
   VarE :: Name n -> Expr n
   AppE :: Expr n -> Expr n -> Expr n
   LamE :: NameBinder n l -> Expr l -> Expr n
-
--- >>> putStrLn $ ppExpr identity
--- λx1. x1
--- >>> putStrLn $ ppExpr two
--- λx1. λx2. x1(x1(x2))
-ppExpr :: Expr n -> String
-ppExpr expr = case expr of
-  VarE name -> ppName name
-  AppE e1 e2 -> ppExpr e1 ++ "(" ++ ppExpr e2 ++ ")"
-  LamE x body -> "λ" ++ ppName (nameOf x) ++ ". " ++ ppExpr body
-
 
 -- Distinct constraints
 class ExtEndo (n :: S)
@@ -121,25 +108,23 @@ data ExtEvidence ( n:: S) ( l :: S) where
 unsafeExt :: ExtEvidence n l
 unsafeExt = unsafeCoerce (Ext :: ExtEvidence VoidS VoidS)
 
-withFresh :: Distinct n => Scope n -> Label
+withFresh :: Distinct n => Scope n
   -> (forall l . DExt n l => NameBinder n l -> r ) -> r
-withFresh scope labelToBind cont = withFreshBinder scope labelToBind (\binder ->
+withFresh scope cont = withFreshBinder scope (\binder ->
   unsafeAssertFresh binder cont)
 
 unsafeAssertFresh :: forall n l n' l' r. NameBinder n l
   -> (DExt n' l' => NameBinder n' l' -> r) -> r
 unsafeAssertFresh binder cont =
   case unsafeDistinct @l' of
-    -- #FIXME: when using originally @l' and @n' gives an error about type variables not in scope
     Distinct -> case unsafeExt @n' @l' of
       Ext -> cont (unsafeCoerce binder)
 
 withRefreshed :: Distinct o => Scope o -> Name i
   -> (forall o'. DExt o o' => NameBinder o o' -> r) -> r
-withRefreshed scope@(UnsafeScope scopemap) name@(UnsafeName (id, x)) cont =
-  case Map.lookup id scopemap of
-     Just label -> withFresh scope label cont
-     Nothing -> unsafeAssertFresh (UnsafeNameBinder name) cont
+withRefreshed scope@(UnsafeScope rawScope) name@(UnsafeName id) cont
+  | Set.member id rawScope = withFresh scope cont
+  | otherwise = unsafeAssertFresh (UnsafeNameBinder name) cont
 
 -- generic sinking
 concreteSink :: DExt n l => Expr n -> Expr l
@@ -170,16 +155,16 @@ data Substitution (e :: S -> *) (i :: S) (o :: S) =
   UnsafeSubstitution (forall n. Name n -> e n) (Map Int (e o))
 
 lookupSubst :: Substitution e i o -> Name i -> e o
-lookupSubst (UnsafeSubstitution f env) (UnsafeName (id, label)) =
+lookupSubst (UnsafeSubstitution f env) (UnsafeName id) =
     case Map.lookup id env of
         Just ex -> ex
-        Nothing -> f (UnsafeName (id, label))
+        Nothing -> f (UnsafeName id)
 
 identitySubst :: (forall n. Name n -> e n) -> Substitution e i i
 identitySubst f = UnsafeSubstitution f Map.empty
 
 addSubst :: Substitution e i o -> NameBinder i i' -> e o -> Substitution e i' o
-addSubst (UnsafeSubstitution f env) (UnsafeNameBinder (UnsafeName (id, label))) ex = UnsafeSubstitution f (Map.insert id ex env)
+addSubst (UnsafeSubstitution f env) (UnsafeNameBinder (UnsafeName id)) ex = UnsafeSubstitution f (Map.insert id ex env)
 
 addRename :: Substitution e i o -> NameBinder i i' -> Name o -> Substitution e i' o
 addRename s@(UnsafeSubstitution f env) b@(UnsafeNameBinder (UnsafeName name1)) n@(UnsafeName name2)
@@ -193,9 +178,15 @@ instance (Sinkable e) => Sinkable (Substitution e i) where
 data ScopedAST sig n where
   ScopedAST :: NameBinder n l -> AST sig l -> ScopedAST sig n
 
+instance (forall l. NFData (AST sig l)) => NFData (ScopedAST sig n) where
+  rnf (ScopedAST binder body) = rnf binder `seq` rnf body
+
 data AST sig n where
   Var :: Name n -> AST sig n
   Node :: sig (ScopedAST sig n) (AST sig n) -> AST sig n
+
+deriving instance (forall scope term. (Generic scope, Generic term) => Generic (sig scope term)) => Generic (AST sig n)
+deriving instance (forall scope term. (NFData scope, NFData term) => NFData (sig scope term), forall scope term. (Generic scope, Generic term) => Generic (sig scope term)) => NFData (AST sig n)
 
 instance Bifunctor sig => Sinkable (AST sig) where
   -- sinkabilityProof :: (Name n -> Name l) -> AST sig n -> AST sig l
@@ -228,7 +219,7 @@ data LambdaPiF scope term
   = AppF term term
   | LamF scope
   | PiF term scope
-  deriving (Eq, Show, Functor)
+  deriving (Eq, Show, Functor, NFData, Generic)
 deriveBifunctor ''LambdaPiF
 
 type LambdaPi n = AST LambdaPiF n
@@ -253,52 +244,66 @@ whnf scope = \case
 
 nf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
 nf scope = \case
-  Lam binder body -> Lam binder (nf body)
+  Lam binder body -> unsafeAssertFresh binder \binder' ->
+          let scope' = extendScope binder' scope
+        in Lam binder' (nf scope' body)
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->
         let subst =  addSubst (identitySubst Var) binder arg
         in nf scope (substitute scope subst body)
-      fun' -> App (nf fun') (nf arg)
+      fun' -> App (nf scope fun') (nf scope arg)
   t -> t
+
+nfd :: LambdaPi VoidS -> LambdaPi VoidS
+nfd term = nf emptyScope term
 
 toLambdaPi :: Distinct n => Scope n -> Map Int (Name n) -> LC.LC IdInt.IdInt -> LambdaPi n
 toLambdaPi scope env = \case
   LC.Var (IdInt.IdInt x) ->
     case Map.lookup x env of
       Just name -> Var name
-      Nothing -> error ("unbound variable: " ++ x)
+      Nothing -> error ("unbound variable: " ++ show x)
 
   LC.App fun arg ->
     App (toLambdaPi scope env fun) (toLambdaPi scope env arg)
 
-  LC.Lam (IdInt.IdInt x) body -> withFresh scope x $ \binder ->
+  LC.Lam (IdInt.IdInt x) body -> withFresh scope $ \binder ->
     let scope' = extendScope binder scope
         env' = Map.insert x (nameOf binder) (sink <$> env)
     in Lam binder (toLambdaPi scope' env' body)
 
-toDB :: LC.LC IdInt.IdInt -> LambdaPi n
-toDB = toLambdaPi emptyScope Map.empty
+fromLC :: LC.LC IdInt.IdInt -> LambdaPi VoidS
+fromLC term = toLambdaPi emptyScope Map.empty term
 
-fromLambdaPi :: LambdaPi n -> LC.LC IdInt.IdInt 
+fromLambdaPi :: LambdaPi n -> LC.LC IdInt.IdInt
 fromLambdaPi = \case
-  Var x -> LC.Var (IdInt.IdInt x)
+  Var (UnsafeName id) -> LC.Var (IdInt.IdInt id)
   App fun arg -> LC.App (fromLambdaPi fun) (fromLambdaPi arg)
   Lam binder body ->
-    let UnsafeName (id, x) = nameOf binder
-    in LC.Lam (IdInt.IdInt x) (fromLambdaPi body)
+    let UnsafeName id = nameOf binder
+    in LC.Lam (IdInt.IdInt id) (fromLambdaPi body)
+
+two :: LambdaPi VoidS
+two = withFresh emptyScope
+  (\ s -> Lam s $ withFresh (extendScope s emptyScope)
+    (\ z -> Lam z (App (Var (sink (nameOf s)))
+                        (App (Var (sink (nameOf s)))
+                             (Var (nameOf z))))))
+
+appTwo = App two two
 
 
-fromDB :: LambdaPi n -> LC.LC IdInt.IdInt
-fromDB = fromLambdaPi
+toLC :: LambdaPi n -> LC.LC IdInt.IdInt
+toLC = fromLambdaPi
 
 impl :: LambdaImpl.LambdaImpl
 impl =
   LambdaImpl.LambdaImpl
     { LambdaImpl.impl_name = "FreeScoped.Foil",
-      LambdaImpl.impl_fromLC = toDB,
-      LambdaImpl.impl_toLC = fromDB,
-      LambdaImpl.impl_nf = nf,
+      LambdaImpl.impl_fromLC = fromLC,
+      LambdaImpl.impl_toLC = toLC,
+      LambdaImpl.impl_nf = nfd,
       LambdaImpl.impl_nfi = error "nfi unimplemented",
       LambdaImpl.impl_aeq = error "aeq unimplemented"
     }
