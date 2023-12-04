@@ -2,6 +2,8 @@ resolver: lts-14.27
 packages:
 - '.'
 extra-deps: 
+  - nominal-0.2.0.0@sha256:1d6153134ecfe386c255d1da6466c5fa3e635d5db435d6c69d21643a6c65a27a,2896
+  - nom-0.1.0.2@sha256:920c20e386ef12fad6fb3ab95ac8cb140f95150b42ff61aaa57fa07b3fb84e69,4620
   - unbound-0.5.1.1
   - RepLib-0.5.4.1@sha256:f1d0765fbdc55c0905b3b70f1953a440cb8d04b65b3ccd6f067ee0f082f6fa0d,1953
   - containers-0.5.11.0@sha256:28ad7337057442f75bc689315ab4ec7bdf5e6b2c39668f306672cecd82c02798,16685

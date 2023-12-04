@@ -1,0 +1,186 @@
+@@ -12,17 +12,17 @@
+ {-# LANGUAGE ScopedTypeVariables #-}
+ {-# LANGUAGE BlockArguments #-}
+ 
+-module FreeScoped.Foil where
++module FreeScoped.Foil (impl) where
+ 
+ import Data.Map (Map)
+ import qualified Data.Map as Map
+ import qualified Data.IntSet as Set
+ import Unsafe.Coerce
+ import System.Exit (exitFailure)
+-import qualified Core.Core as Syntax
++import qualified Util.Syntax.Lambda as LC
+ 
+ type Id = Int
+-type Label = String
++type Label = Id
+ type RawName = (Id, Label)
+ type RawScope = Map Int Label
+ 
+@@ -36,8 +36,8 @@
+ data NameBinder (n :: S) (l :: S) =
+   UnsafeNameBinder (Name l)
+ 
+-ppName :: Name n -> Label
+-ppName (UnsafeName (id, name)) = name
++ppName :: Name n -> String
++ppName (UnsafeName (id, name)) = show name
+ 
+ emptyScope :: Scope VoidS
+ emptyScope = UnsafeScope Map.empty
+@@ -47,10 +47,10 @@
+   UnsafeScope (Map.insert id name scope)
+ 
+ rawFreshName :: RawScope -> Label -> RawName
+-rawFreshName scope labelToBind | Map.null scope = (0, labelToBind ++ show 0)
++rawFreshName scope labelToBind | Map.null scope = (0, labelToBind)
+                                | otherwise =
+                                   let (maxId, _) = Map.findMax scope
+-                                    in (maxId + 1, labelToBind ++ show (maxId + 1))
++                                    in (maxId + 1, labelToBind + (maxId + 1))
+ 
+ withFreshBinder
+   :: Scope n
+@@ -184,36 +184,36 @@
+     UnsafeSubstitution f (fmap (sinkabilityProof rename) env)
+ 
+ data ScopedAST sig n where
+-  ScopedAST :: Foil.NameBinder n l -> AST sig l -> ScopedAST sig n
++  ScopedAST :: NameBinder n l -> AST sig l -> ScopedAST sig n
+ 
+ data AST sig n where
+-  Var :: Foil.Name n -> AST sig n
++  Var :: Name n -> AST sig n
+   Node :: sig (ScopedAST sig n) (AST sig n) -> AST sig n
+ 
+-instance Bifunctor sig => Foil.Sinkable (AST sig) where
++instance Bifunctor sig => Sinkable (AST sig) where
+   -- sinkabilityProof :: (Name n -> Name l) -> AST sig n -> AST sig l
+   sinkabilityProof rename = \case
+     Var name -> Var (rename name)
+-    Node node -> Node (bimap f (Foil.sinkabilityProof rename) node)
++    Node node -> Node (bimap f (sinkabilityProof rename) node)
+     where
+       f (ScopedAST binder body) =
+-        Foil.extendRenaming rename binder $ \rename' binder' ->
+-          ScopedAST binder' (Foil.sinkabilityProof rename' body)
++        extendRenaming rename binder $ \rename' binder' ->
++          ScopedAST binder' (sinkabilityProof rename' body)
+ 
+ substitute
+-  :: (Bifunctor sig, Foil.Distinct o)
+-  => Foil.Scope o
+-  -> Foil.Substitution (AST sig) i o
++  :: (Bifunctor sig, Distinct o)
++  => Scope o
++  -> Substitution (AST sig) i o
+   -> AST sig i
+   -> AST sig o
+ substitute scope subst = \case
+-  Var name -> Foil.lookupSubst subst name
++  Var name -> lookupSubst subst name
+   Node node -> Node (bimap f (substitute scope subst) node)
+   where
+     f (ScopedAST binder body) =
+-      Foil.withRefreshed scope (Foil.nameOf binder) $ \binder' ->
+-        let subst' = Foil.addRename (Foil.sink subst) binder (Foil.nameOf binder')
+-            scope' = Foil.extendScope binder' scope
++      withRefreshed scope (nameOf binder) $ \binder' ->
++        let subst' = addRename (sink subst) binder (nameOf binder')
++            scope' = extendScope binder' scope
+             body' = substitute scope' subst' body
+         in ScopedAST binder' body'
+ 
+@@ -229,54 +229,69 @@
+ pattern App :: LambdaPi n -> LambdaPi n -> LambdaPi n
+ pattern App fun arg = Node (AppF fun arg)
+ 
+-pattern Lam :: Foil.NameBinder n l -> LambdaPi l -> LambdaPi n
++pattern Lam :: NameBinder n l -> LambdaPi l -> LambdaPi n
+ pattern Lam binder body = Node (LamF (ScopedAST binder body))
+ 
+ {-# COMPLETE Var, App, Lam, Pi #-}
+ 
+-whnf :: Foil.Distinct n => Foil.Scope n -> LambdaPi n -> LambdaPi n
++whnf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
+ whnf scope = \case
+   App fun arg ->
+     case whnf scope fun of
+       Lam binder body ->
+-        let subst = Foil.addSubst (Foil.identitySubst Var) binder arg
++        let subst =  .addSubst (identitySubst Var) binder arg
+         in whnf scope (substitute scope subst body)
+       fun' -> App fun' arg
+   t -> t
+ 
+-toLambdaPi :: Foil.Distinct n => Foil.Scope n -> Map String (Foil.Name n) -> LC IdInt -> LambdaPi n
++nf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
++nf scope = \case
++  Lam binder body = Lam binder (nf body)
++  App fun arg ->
++    case whnf scope fun of
++      Lam binder body ->
++        let subst =  .addSubst (identitySubst Var) binder arg
++        in nf scope (substitute scope subst body)
++      fun' -> App (nf fun') (nf arg)
++  t -> t
++
++toLambdaPi :: Distinct n => Scope n -> Map Int (Name n) -> LC.LC IdInt -> LambdaPi n
+ toLambdaPi scope env = \case
+-  Syntax.Var x ->
++  LC.Var (IdInt x) ->
+     case Map.lookup x env of
+       Just name -> Var name
+       Nothing -> error ("unbound variable: " ++ x)
+ 
+-  Syntax.App fun arg ->
++  LC.App fun arg ->
+     App (toLambdaPi scope env fun) (toLambdaPi scope env arg)
+ 
+-  Syntax.Lam x body -> Foil.withFresh scope x $ \binder ->
+-    let scope' = Foil.extendScope binder scope
+-        env' = Map.insert x (Foil.nameOf binder) (Foil.sink <$> env)
++  LC.Lam (IdInt x) body -> withFresh scope x $ \binder ->
++    let scope' = extendScope binder scope
++        env' = Map.insert x (nameOf binder) (sink <$> env)
+     in Lam binder (toLambdaPi scope' env' body)
+ 
+-fromLambdaPi :: LC IdInt -> Syntax.Term
++toDB :: LC.LC IdInt -> LambdaPi n
++toDB = toLambdaPi emptyScope Map.empty
++
++fromLambdaPi :: LambdaPi n -> LC.LC IdInt
+ fromLambdaPi = \case
+-  Var x -> Syntax.Var (Syntax.Ident x)
+-  App fun arg -> Syntax.App (fromLambdaPi fun) (fromLambdaPi arg)
++  Var x -> LC.Var (IdInt x)
++  App fun arg -> Lc.App (fromLambdaPi fun) (fromLambdaPi arg)
+   Lam binder body ->
+-    let Foil.UnsafeName (id, x) = Foil.nameOf binder
+-    in Syntax.Lam (Syntax.Ident x) (fromLambdaPi body)
+-  Pi binder a b ->
+-    let Foil.UnsafeName (id, x) = Foil.nameOf binder
+-    in Syntax.Pi (Syntax.Ident x) (fromLambdaPi a) (fromLambdaPi b)
++    let UnsafeName (id, x) = nameOf binder
++    in LC.Lam (IndInt x) (fromLambdaPi body)
++
++
++fromDB :: LambdaPi n -> LC.LC IdInt
++fromDB = fromLambdaPi
+ 
+ impl :: LambdaImpl
+ impl =
+   LambdaImpl
+-    { impl_name = "Foil.Foil",
+-      impl_fromLC = fromLambdaPi,
+-      impl_toLC = toLambdaPi,
+-      impl_nf = nfd,
++    { impl_name = "FreeScoped.Foil",
++      impl_fromLC = toDB,
++      impl_toLC = fromDB,
++      impl_nf = nf,
+       impl_nfi = error "nfi unimplemented",
+       impl_aeq = error "aeq unimplemented"
+     }

@@ -31,6 +31,7 @@ import qualified DeBruijn.Par.L
 import qualified DeBruijn.Par.P
 import qualified DeBruijn.Par.Scoped
 import qualified DeBruijn.TAPL
+import qualified FreeScoped.Foil
 import qualified Lennart.DeBruijn
 import qualified Lennart.HOAS
 import qualified Lennart.Simple
@@ -99,7 +100,7 @@ broken =
 
 all_impls :: [LambdaImpl]
 all_impls =
-  debruijn ++ debruijn_lazy ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
+  debruijn ++ debruijn_lazy ++ freeScoped ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
     ++ lennart
     ++ unbound
     ++ nbe
@@ -155,6 +156,9 @@ debruijn_lazy =
     DeBruijn.Lazy.Kit.impl,
     DeBruijn.Lazy.Par.Scoped.impl
   ]
+
+freeScoped :: [LambdaImpl]
+freeScoped = [ FreeScoped.Foil.impl ]
 
 -- | Locally Nameless based implmentations
 locallyNameless :: [LambdaImpl]

@@ -69,6 +69,8 @@ library
       DeBruijn.Lazy.Par.L
       DeBruijn.Lazy.Par.Scoped
 
+      FreeScoped.Foil
+
       LocallyNameless.Ott
       LocallyNameless.Opt
       LocallyNameless.SupportInstOpt
@@ -87,10 +89,10 @@ library
       LocallyNameless.Lazy.ParScoped
       LocallyNameless.Lazy.ParOpt
       LocallyNameless.Lazy.TypedOtt
-    
+
       Unbound.UnboundGenerics
       Unbound.UnboundNonGenerics
-    
+
       Lennart.HOAS
       Lennart.SimpleOrig
       Lennart.Simple
@@ -100,7 +102,7 @@ library
       Named.Lennart
       Named.Simple
       Named.Unique
-      Named.Nom  
+      Named.Nom
       Named.NominalG
       Named.SimpleH
       Named.SimpleGH
@@ -110,7 +112,7 @@ library
       Named.Lazy.SimpleH
       Named.Lazy.SimpleGH
       Named.Lazy.SimpleM
-      
+
       Core.Core
       Core.Unique
       Core.FV
@@ -122,10 +124,10 @@ library
       Core.UniqDFM
       Core.UniqSet
       Core.Nf
-      
+
       DeBruijn.Krivine
       DeBruijn.KrivineScoped
-      
+
       NBE.Aelig
       NBE.Boesflug
       NBE.Felgenhauer
@@ -134,14 +136,11 @@ library
       NBE.KovacsScoped
       NBE.KovacsScoped2
 
-      FreeScoped.Foil
-
 
   ghc-options:  -O2 -funfolding-use-threshold=16 -fno-warn-unticked-promoted-constructors -fcross-module-specialise
   build-depends:
                   base >= 4.13
                 , QuickCheck >= 2.13.2
-                , bifunctors == 5.5.11
 --                , RepLib >= 0.5.4.2
                 , bound
                 , containers
@@ -163,7 +162,7 @@ library
                 , dependent-map
   default-language: Haskell2010
   default-extensions:
-                  DataKinds 
+                  DataKinds
                 , DeriveGeneric
                 , DeriveTraversable
                 , EmptyCase
@@ -206,7 +205,7 @@ executable LC
   --             , unbound >= 0.5.1.3
                , unbound-generics >= 0.4.1
   default-extensions:
-                  DataKinds 
+                  DataKinds
                 , DeriveGeneric
                 , DeriveTraversable
                 , EmptyCase
@@ -226,7 +225,7 @@ executable LC
                 , TypeApplications
                 , TypeOperators
                 , UndecidableInstances
-                
+
 test-suite test-timing
   default-language: Haskell2010
   hs-source-dirs: tests
@@ -244,7 +243,7 @@ test-suite test-timing
                 , tasty-quickcheck
                 , tasty-quickcheck >= 0.10.1.1
  default-extensions:
-                  DataKinds 
+                  DataKinds
                 , DeriveGeneric
                 , DeriveTraversable
                 , EmptyCase

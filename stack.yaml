@@ -1,6 +1,6 @@
 resolver: lts-18.22
 # resolver: lts-15.14
-allow-newer: false
+allow-newer: true
 
 packages:
 - '.'
@@ -11,7 +11,7 @@ extra-deps:
 - nom-0.1.0.2@sha256:920c20e386ef12fad6fb3ab95ac8cb140f95150b42ff61aaa57fa07b3fb84e69,4620
 - Unique-0.4.7.8@sha256:9661f45aa31dde119a2114566166ea38b011a45653337045ee4ced75636533c0,2067
 - algebra-4.3.1@sha256:323cf20c508e0b71422b767ff3a89e4188f68aa59b2df9d0fe6e9f9bae7938fb,4129
-- git: git@github.com:sweirich/replib.git
+- git: https://github.com/KarinaTyulebaeva/replib.git
   commit: b49c038680bd9ae5f52c727e2d838469f53cfed3
   subdirs:
   - RepLib 
