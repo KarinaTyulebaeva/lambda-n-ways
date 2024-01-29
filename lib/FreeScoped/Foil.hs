@@ -152,10 +152,10 @@ extendRenaming _ (UnsafeNameBinder name) cont =
   cont unsafeCoerce (UnsafeNameBinder name)
 
 -- Substitution
-data Substitution (e :: S -> *) (i :: S) (o :: S) =
-  UnsafeSubstitution (forall n. Name n -> e n) (IntMap (e o))
+newtype Substitution (sig :: * -> * -> *) (i :: S) (o :: S) =
+  UnsafeSubstitution (IntMap (AST sig o))
 
-lookupSubst :: Substitution e i o -> Name i -> e o
+lookupSubst :: Substitution sig i o -> Name i -> AST sig o
 lookupSubst (UnsafeSubstitution env) (UnsafeName id) =
     case IntMap.lookup id env of
         Just ex -> ex
