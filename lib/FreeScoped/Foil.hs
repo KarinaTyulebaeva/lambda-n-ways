@@ -22,9 +22,10 @@ module FreeScoped.Foil where
 
 import Data.Bifunctor
 import Data.Bifunctor.TH (deriveBifunctor)
-import Data.Map (Map)
-import qualified Data.Map as Map
-import qualified Data.IntSet as Set
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
 import Unsafe.Coerce
 import System.Exit (exitFailure)
 import qualified Util.Syntax.Lambda as LC
@@ -35,7 +36,7 @@ import GHC.Generics (Generic)
 
 type Id = Int
 type RawName = Id
-type RawScope = Set.IntSet
+type RawScope = IntSet
 
 data {- kind -} S
   = {- type -} VoidS
@@ -45,21 +46,21 @@ data {- kind -} S
 newtype Scope (n :: S) = UnsafeScope RawScope
   deriving newtype NFData
 newtype Name (n :: S) = UnsafeName RawName
-  deriving newtype NFData
+  deriving newtype (NFData, Eq, Ord)
 newtype NameBinder (n :: S) (l :: S) =
   UnsafeNameBinder (Name l)
-    deriving newtype NFData
+    deriving newtype (NFData, Eq, Ord)
 
 emptyScope :: Scope VoidS
-emptyScope = UnsafeScope Set.empty
+emptyScope = UnsafeScope IntSet.empty
 
 extendScope :: NameBinder n l -> Scope n -> Scope l
 extendScope (UnsafeNameBinder (UnsafeName id)) (UnsafeScope scope) =
-  UnsafeScope (Set.insert id scope)
+  UnsafeScope (IntSet.insert id scope)
 
 rawFreshName :: RawScope -> RawName
-rawFreshName scope | Set.null scope = 0
-                   | otherwise = Set.findMax scope + 1
+rawFreshName scope | IntSet.null scope = 0
+                   | otherwise = IntSet.findMax scope + 1
 
 withFreshBinder
   :: Scope n
@@ -74,7 +75,7 @@ nameOf :: NameBinder n l -> Name l
 nameOf (UnsafeNameBinder name) = name
 
 rawMember :: RawName -> RawScope -> Bool
-rawMember i s = Set.member i s
+rawMember i s = IntSet.member i s
 
 member :: Name l -> Scope n -> Bool
 member (UnsafeName name) (UnsafeScope s) = rawMember name s
@@ -123,7 +124,7 @@ unsafeAssertFresh binder cont =
 withRefreshed :: Distinct o => Scope o -> Name i
   -> (forall o'. DExt o o' => NameBinder o o' -> r) -> r
 withRefreshed scope@(UnsafeScope rawScope) name@(UnsafeName id) cont
-  | Set.member id rawScope = withFresh scope cont
+  | IntSet.member id rawScope = withFresh scope cont
   | otherwise = unsafeAssertFresh (UnsafeNameBinder name) cont
 
 -- generic sinking
@@ -135,6 +136,9 @@ class Sinkable (e :: S -> *) where
 
 instance Sinkable Name where
   sinkabilityProof rename = rename
+
+instance Sinkable IntMap where
+  sinkabilityProof rename = fmap rename
 
 sink :: (Sinkable e, DExt n l) => e n -> e l
 sink = unsafeCoerce
@@ -151,29 +155,29 @@ extendRenaming _ (UnsafeNameBinder name) cont =
   cont unsafeCoerce (UnsafeNameBinder name)
 
 -- Substitution
-data Substitution (e :: S -> *) (i :: S) (o :: S) =
-  UnsafeSubstitution (forall n. Name n -> e n) (Map Int (e o))
+newtype Substitution (e :: S -> *) (i :: S) (o :: S) =
+  UnsafeSubstitution (IntMap (e o))
 
 lookupSubst :: Substitution e i o -> Name i -> e o
-lookupSubst (UnsafeSubstitution f env) (UnsafeName id) =
-    case Map.lookup id env of
+lookupSubst (UnsafeSubstitution env) (UnsafeName id) =
+    case IntMap.lookup id env of
         Just ex -> ex
-        Nothing -> f (UnsafeName id)
+        Nothing -> Var (UnsafeName id)
 
-identitySubst :: (forall n. Name n -> e n) -> Substitution e i i
-identitySubst f = UnsafeSubstitution f Map.empty
+identitySubst :: Substitution e i i
+identitySubst = UnsafeSubstitution IntMap.empty
 
 addSubst :: Substitution e i o -> NameBinder i i' -> e o -> Substitution e i' o
-addSubst (UnsafeSubstitution f env) (UnsafeNameBinder (UnsafeName id)) ex = UnsafeSubstitution f (Map.insert id ex env)
+addSubst (UnsafeSubstitution env) (UnsafeNameBinder (UnsafeName id)) ex = UnsafeSubstitution (IntMap.insert id ex env)
 
 addRename :: Substitution e i o -> NameBinder i i' -> Name o -> Substitution e i' o
-addRename s@(UnsafeSubstitution f env) b@(UnsafeNameBinder (UnsafeName name1)) n@(UnsafeName name2)
-    | name1 == name2 = UnsafeSubstitution f env
-    | otherwise = addSubst s b (f n)
+addRename s@(UnsafeSubstitution env) b@(UnsafeNameBinder (UnsafeName name1)) n@(UnsafeName name2)
+    | name1 == name2 = UnsafeSubstitution (IntMap.delete name1 env)
+    | otherwise = addSubst s b (Var n)
 
 instance (Sinkable e) => Sinkable (Substitution e i) where
-  sinkabilityProof rename (UnsafeSubstitution f env) =
-    UnsafeSubstitution f (fmap (sinkabilityProof rename) env)
+  sinkabilityProof rename (UnsafeSubstitution env) =
+    UnsafeSubstitution (fmap (sinkabilityProof rename) env)
 
 data ScopedAST sig n where
   ScopedAST :: NameBinder n l -> AST sig l -> ScopedAST sig n
@@ -237,7 +241,7 @@ whnf scope = \case
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->
-        let subst =  addSubst (identitySubst Var) binder arg
+        let subst =  addSubst identitySubst binder arg
         in whnf scope (substitute scope subst body)
       fun' -> App fun' arg
   t -> t
@@ -250,7 +254,7 @@ nf scope = \case
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->
-        let subst =  addSubst (identitySubst Var) binder arg
+        let subst =  addSubst identitySubst binder arg
         in nf scope (substitute scope subst body)
       fun' -> App (nf scope fun') (nf scope arg)
   t -> t
@@ -258,10 +262,10 @@ nf scope = \case
 nfd :: LambdaPi VoidS -> LambdaPi VoidS
 nfd term = nf emptyScope term
 
-toLambdaPi :: Distinct n => Scope n -> Map Int (Name n) -> LC.LC IdInt.IdInt -> LambdaPi n
+toLambdaPi :: Distinct n => Scope n -> IntMap Int (Name n) -> LC.LC IdInt.IdInt -> LambdaPi n
 toLambdaPi scope env = \case
   LC.Var (IdInt.IdInt x) ->
-    case Map.lookup x env of
+    case IntMap.lookup x env of
       Just name -> Var name
       Nothing -> error ("unbound variable: " ++ show x)
 
@@ -270,11 +274,20 @@ toLambdaPi scope env = \case
 
   LC.Lam (IdInt.IdInt x) body -> withFresh scope $ \binder ->
     let scope' = extendScope binder scope
-        env' = Map.insert x (nameOf binder) (sink <$> env)
+        env' = IntMap.insert x (nameOf binder) (sink <$> env)
     in Lam binder (toLambdaPi scope' env' body)
 
+captureLc :: LC.LC IdInt.IdInt
+captureLc = LC.App (LC.Lam (IdInt.IdInt 1) (LC.Lam (IdInt.IdInt 2) (LC.App (LC.Var (IdInt.IdInt 2)) (LC.Var (IdInt.IdInt 1))))) (LC.Lam (IdInt.IdInt 2) (LC.Lam (IdInt.IdInt 1) (LC.App (LC.Var (IdInt.IdInt 1)) (LC.Var (IdInt.IdInt 2)))))
+
+appCaptue :: LC.LC IdInt.IdInt
+appCaptue = LC.App captureLc (LC.Lam (IdInt.IdInt 1) (LC.Var (IdInt.IdInt 1)))
+
+appCaptue2 :: LC.LC IdInt.IdInt
+appCaptue2 = LC.App (toLC (whnf emptyScope (fromLC captureLc))) (LC.Lam (IdInt.IdInt 1) (LC.Var (IdInt.IdInt 1)))
+
 fromLC :: LC.LC IdInt.IdInt -> LambdaPi VoidS
-fromLC term = toLambdaPi emptyScope Map.empty term
+fromLC term = toLambdaPi emptyScope IntMap.empty term
 
 fromLambdaPi :: LambdaPi n -> LC.LC IdInt.IdInt
 fromLambdaPi = \case
@@ -293,9 +306,37 @@ two = withFresh emptyScope
 
 appTwo = App two two
 
-
 toLC :: LambdaPi n -> LC.LC IdInt.IdInt
 toLC = fromLambdaPi
+
+renameVar :: IntMap (Name n) -> Name n -> Name n
+renameVar subst name1@(UnsafeName i) = case IntMap.lookup i subst of
+  Just name2 -> name2
+  Nothing -> name1
+
+-- \x1.\x2
+aeq :: IntMap (Name n) -> IntMap (Name n) -> IntSet -> IntSet  -> LambdaPi n -> LambdaPi n ->  Bool
+aeq subst1 subst2 target1 target2 (Var x@(UnsafeName id1)) (Var y@(UnsafeName id2))
+  | IntSet.member id1 target1 = False
+  | IntSet.member id2 target2 = False
+  | otherwise = (renameVar subst1 x) == (renameVar subst2 y)
+aeq subst1 subst2 target1 target2 (App fun1 body1) (App fun2 body2) = (aeq subst1 subst2 target1 target2 fun1 fun2) && (aeq subst1 subst2 target1 target2 body1 body2)
+aeq subst1 subst2 target1 target2 (Lam binder1 body1) (Lam binder2 body2)
+  | binder1 == binder2 = aeq (sink subst1) (sink subst2) target1 target2 body1 body2
+  | binder1 < binder2 =
+        let (UnsafeName name2) = nameOf binder2
+            subst2' = IntMap.insert name2 (nameOf binder1) subst2
+            target2' = IntSet.insert (nameOf binder1) target2
+        in aeq (sink subst1) (sink subst2') target1 target2' body1 body2
+  | otherwise =
+        let (UnsafeName name1) = nameOf binder1
+            subst1' = IntMap.insert name1 (nameOf binder2) subst1
+            target1' = IntSet.insert (nameOf binder2) target1
+        in aeq (sink subst1') (sink subst2) target1' target2 body1 body2
+aeq _ _ _ _ _ _ = False
+
+aeq_impl :: LambdaPi n -> LambdaPi n -> Bool
+aeq_impl = aeq IntMap.empty IntMap.empty IntSet.empty IntSet.empty
 
 impl :: LambdaImpl.LambdaImpl
 impl =
@@ -305,5 +346,5 @@ impl =
       LambdaImpl.impl_toLC = toLC,
       LambdaImpl.impl_nf = nfd,
       LambdaImpl.impl_nfi = error "nfi unimplemented",
-      LambdaImpl.impl_aeq = error "aeq unimplemented"
+      LambdaImpl.impl_aeq = aeq_impl
     }
