@@ -137,9 +137,6 @@ class Sinkable (e :: S -> *) where
 instance Sinkable Name where
   sinkabilityProof rename = rename
 
-instance Sinkable IntMap where
-  sinkabilityProof rename = fmap rename
-
 sink :: (Sinkable e, DExt n l) => e n -> e l
 sink = unsafeCoerce
 
@@ -155,8 +152,8 @@ extendRenaming _ (UnsafeNameBinder name) cont =
   cont unsafeCoerce (UnsafeNameBinder name)
 
 -- Substitution
-newtype Substitution (e :: S -> *) (i :: S) (o :: S) =
-  UnsafeSubstitution (IntMap (e o))
+data Substitution (e :: S -> *) (i :: S) (o :: S) =
+  UnsafeSubstitution (forall n. Name n -> e n) (IntMap (e o))
 
 lookupSubst :: Substitution e i o -> Name i -> e o
 lookupSubst (UnsafeSubstitution env) (UnsafeName id) =
@@ -262,7 +259,7 @@ nf scope = \case
 nfd :: LambdaPi VoidS -> LambdaPi VoidS
 nfd term = nf emptyScope term
 
-toLambdaPi :: Distinct n => Scope n -> IntMap Int (Name n) -> LC.LC IdInt.IdInt -> LambdaPi n
+toLambdaPi :: Distinct n => Scope n -> IntMap (Name n) -> LC.LC IdInt.IdInt -> LambdaPi n
 toLambdaPi scope env = \case
   LC.Var (IdInt.IdInt x) ->
     case IntMap.lookup x env of
@@ -309,30 +306,40 @@ appTwo = App two two
 toLC :: LambdaPi n -> LC.LC IdInt.IdInt
 toLC = fromLambdaPi
 
-renameVar :: IntMap (Name n) -> Name n -> Name n
-renameVar subst name1@(UnsafeName i) = case IntMap.lookup i subst of
-  Just name2 -> name2
-  Nothing -> name1
+-- | A renaming of variables that keeps the same scope.
+type Renaming n = Substitution Name n n
+
+-- | Rename variable using a renaming substitution.
+renameVar :: Renaming n -> Name n -> Name n
+renameVar = lookupSubst
 
 -- \x1.\x2
-aeq :: IntMap (Name n) -> IntMap (Name n) -> IntSet -> IntSet  -> LambdaPi n -> LambdaPi n ->  Bool
-aeq subst1 subst2 target1 target2 (Var x@(UnsafeName id1)) (Var y@(UnsafeName id2))
-  | IntSet.member id1 target1 = False
-  | IntSet.member id2 target2 = False
+aeq
+  :: Renaming n     -- ^
+  -> Renaming n     -- ^
+  -> Scope n        -- ^
+  -> Scope n        -- ^
+  -> LambdaPi n     -- ^
+  -> LambdaPi n     -- ^
+  -> Bool
+aeq subst1 subst2 target1 target2 (Var x) (Var y)
+  | member x target1 = False
+  | member y target2 = False
   | otherwise = (renameVar subst1 x) == (renameVar subst2 y)
-aeq subst1 subst2 target1 target2 (App fun1 body1) (App fun2 body2) = (aeq subst1 subst2 target1 target2 fun1 fun2) && (aeq subst1 subst2 target1 target2 body1 body2)
+aeq subst1 subst2 target1 target2 (App fun1 arg1) (App fun2 arg2)
+  = and
+    [ aeq subst1 subst2 target1 target2 fun1 fun2
+    , aeq subst1 subst2 target1 target2 arg1 arg2 ]
 aeq subst1 subst2 target1 target2 (Lam binder1 body1) (Lam binder2 body2)
-  | binder1 == binder2 = aeq (sink subst1) (sink subst2) target1 target2 body1 body2
+  | binder1 == binder2 = aeq (sink subst1) (sink subst2) (sink target1) (sink target2) body1 body2
   | binder1 < binder2 =
-        let (UnsafeName name2) = nameOf binder2
-            subst2' = IntMap.insert name2 (nameOf binder1) subst2
-            target2' = IntSet.insert (nameOf binder1) target2
-        in aeq (sink subst1) (sink subst2') target1 target2' body1 body2
+        let subst2' = addRename binder2 (nameOf binder1) subst2
+            target2' = extendScope binder1 target2
+        in aeq (sink subst1) (sink subst2') (sink target1) target2' body1 body2
   | otherwise =
-        let (UnsafeName name1) = nameOf binder1
-            subst1' = IntMap.insert name1 (nameOf binder2) subst1
-            target1' = IntSet.insert (nameOf binder2) target1
-        in aeq (sink subst1') (sink subst2) target1' target2 body1 body2
+        let subst1' = addRename binder1 (nameOf binder2) subst1
+            target1' = extendScope (nameOf binder2) target1
+        in aeq (sink subst1') (sink subst2) target1' (sink target2) body1 body2
 aeq _ _ _ _ _ _ = False
 
 aeq_impl :: LambdaPi n -> LambdaPi n -> Bool
