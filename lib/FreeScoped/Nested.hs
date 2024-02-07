@@ -136,7 +136,7 @@ toLC = from 0
 impl :: LambdaImpl.LambdaImpl
 impl =
   LambdaImpl.LambdaImpl
-    { LambdaImpl.impl_name = "FreeScoped.NestedDeBrujn",
+    { LambdaImpl.impl_name = "FreeScoped.Nested",
       LambdaImpl.impl_fromLC = fromLC,
       LambdaImpl.impl_toLC = toLC,
       LambdaImpl.impl_nf = nfd,
