@@ -80,6 +80,7 @@ import qualified Unbound.UnboundNonGenerics
 -- allow newer GHCs
 --import qualified Unbound.UnboundRep
 import Util.Impl (LambdaImpl)
+import qualified Foil.Foil
 
 -- | Implementations used in the benchmarking/test suite
 -- must be a single variable name for Makefile
@@ -160,7 +161,7 @@ debruijn_lazy =
   ]
 
 freeScoped :: [LambdaImpl]
-freeScoped = [ FreeScoped.Foil.impl, FreeScoped.Nested.impl ]
+freeScoped = [ FreeScoped.Foil.impl, FreeScoped.Nested.impl, Foil.Foil.impl ]
 
 -- | Locally Nameless based implmentations
 locallyNameless :: [LambdaImpl]

@@ -136,6 +136,7 @@ library
 
       FreeScoped.Foil
       FreeScoped.Nested
+      Foil.Foil
 
 
   ghc-options:  -O2 -funfolding-use-threshold=16 -fno-warn-unticked-promoted-constructors -fcross-module-specialise
