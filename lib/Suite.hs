@@ -102,7 +102,7 @@ broken =
 
 all_impls :: [LambdaImpl]
 all_impls =
-  debruijn ++ debruijn_lazy ++ freeScoped
+  freeScoped ++ debruijn ++ debruijn_lazy
   ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
   ++ lennart
   ++ unbound
