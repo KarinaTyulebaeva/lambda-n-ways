@@ -31,6 +31,8 @@ import qualified DeBruijn.Par.L
 import qualified DeBruijn.Par.P
 import qualified DeBruijn.Par.Scoped
 import qualified DeBruijn.TAPL
+import qualified FreeScoped.Eager.Foil
+import qualified FreeScoped.Eager.Nested
 import qualified FreeScoped.Foil
 import qualified FreeScoped.Nested
 import qualified Lennart.DeBruijn
@@ -81,6 +83,7 @@ import qualified Unbound.UnboundNonGenerics
 --import qualified Unbound.UnboundRep
 import Util.Impl (LambdaImpl)
 import qualified Foil.Foil
+import qualified Foil.Eager.Foil
 
 -- | Implementations used in the benchmarking/test suite
 -- must be a single variable name for Makefile
@@ -102,7 +105,8 @@ broken =
 
 all_impls :: [LambdaImpl]
 all_impls =
-  freeScoped ++ debruijn ++ debruijn_lazy
+  freeScoped
+  ++ debruijn ++ debruijn_lazy
   ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
   ++ lennart
   ++ unbound
@@ -161,7 +165,14 @@ debruijn_lazy =
   ]
 
 freeScoped :: [LambdaImpl]
-freeScoped = [ FreeScoped.Foil.impl, FreeScoped.Nested.impl, Foil.Foil.impl ]
+freeScoped =
+  [ FreeScoped.Foil.impl,
+    FreeScoped.Nested.impl,
+    Foil.Foil.impl,
+    Foil.Eager.Foil.impl,
+    FreeScoped.Eager.Foil.impl,
+    FreeScoped.Eager.Nested.impl
+  ]
 
 -- | Locally Nameless based implmentations
 locallyNameless :: [LambdaImpl]

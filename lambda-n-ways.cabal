@@ -134,9 +134,12 @@ library
       NBE.KovacsScoped
       NBE.KovacsScoped2
 
+      FreeScoped.Eager.Foil
+      FreeScoped.Eager.Nested
       FreeScoped.Foil
       FreeScoped.Nested
       Foil.Foil
+      Foil.Eager.Foil
 
 
   ghc-options:  -O2 -funfolding-use-threshold=16 -fno-warn-unticked-promoted-constructors -fcross-module-specialise
