@@ -83,9 +83,9 @@ member :: Name l -> Scope n -> Bool
 member (UnsafeName name) (UnsafeScope s) = rawMember name s
 
 data Expr n where
-  VarE :: !(Name n) -> Expr n
-  AppE :: (Expr n) -> (Expr n) -> Expr n
-  LamE :: !(NameBinder n l) -> (Expr l) -> Expr n
+  VarE :: {-# UNPACK #-} !(Name n) -> Expr n
+  AppE :: !(Expr n) -> !(Expr n) -> Expr n
+  LamE :: !(NameBinder n l) -> !(Expr l) -> Expr n
 
 instance Eq (Expr n) where
   VarE x == VarE y = x == y
@@ -245,7 +245,7 @@ nf_cbv !scope expr = case expr of
   t -> t
 
 nfd :: Expr VoidS -> Expr VoidS
-nfd term = nf_cbv emptyScope term
+nfd term = nf emptyScope term
 
 toLambdaPi :: Distinct n => Scope n -> IntMap (Name n) -> LC.LC IdInt.IdInt -> Expr n
 toLambdaPi !scope !env = \case
@@ -254,12 +254,12 @@ toLambdaPi !scope !env = \case
       Just name -> VarE name
       Nothing -> error ("unbound variable: " ++ show x)
   LC.App fun arg ->
-    (AppE $! (toLambdaPi scope env fun)) $! (toLambdaPi scope env arg)
+    (AppE (toLambdaPi scope env fun)) (toLambdaPi scope env arg)
 
   LC.Lam (IdInt.IdInt x) body -> withFresh scope $ \binder ->
     let !scope' = extendScope binder scope
         !env' = IntMap.insert x (nameOf binder) (sink <$> env)
-    in LamE binder $! (toLambdaPi scope' env' body)
+    in LamE binder (toLambdaPi scope' env' body)
 
 
 
