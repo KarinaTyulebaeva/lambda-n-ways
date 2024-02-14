@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE KindSignatures #-}
@@ -22,8 +23,6 @@
 
 module Foil.Eager.Foil where
 
-import Data.Map (Map)
-import qualified Data.Map as Map
 import Unsafe.Coerce
 import System.Exit (exitFailure)
 import qualified Util.Syntax.Lambda as LC
@@ -85,9 +84,14 @@ member (UnsafeName name) (UnsafeScope s) = rawMember name s
 
 data Expr n where
   VarE :: !(Name n) -> Expr n
-  AppE :: Expr n -> Expr n -> Expr n
-  LamE :: !(NameBinder n l) -> Expr l -> Expr n
+  AppE :: (Expr n) -> (Expr n) -> Expr n
+  LamE :: !(NameBinder n l) -> (Expr l) -> Expr n
 
+instance Eq (Expr n) where
+  VarE x == VarE y = x == y
+  AppE f1 x1 == AppE f2 x2 = (f1 == f2) && (x1 == x2)
+  LamE x1 body1 == LamE x2 body2 = (x1 == unsafeCoerce x2) && (unsafeCoerce body1 == body2)
+  _ == _ = False
 
 instance (forall l. NFData (Expr l)) where
   rnf (LamE binder body) = rnf binder `seq` rnf body
@@ -161,81 +165,101 @@ extendRenaming _ (UnsafeNameBinder name) cont =
   cont unsafeCoerce (UnsafeNameBinder name)
 
 -- Substitution
-data Substitution (e :: S -> *) (i :: S) (o :: S) =
-  UnsafeSubstitution (forall n. Name n -> e n) (IntMap (e o))
+newtype Substitution (e :: S -> *) (i :: S) (o :: S) =
+  UnsafeSubstitution (IntMap (e o))
 
-lookupSubst :: Substitution e i o -> Name i -> e o
-lookupSubst (UnsafeSubstitution f env) (UnsafeName id) =
+class HasVar (e :: S -> *) where
+  makeVar :: Name n -> e n
+
+lookupSubst :: HasVar e => Substitution e i o -> Name i -> e o
+lookupSubst !(UnsafeSubstitution env) (UnsafeName id) =
     case IntMap.lookup id env of
         Just ex -> ex
-        Nothing -> f (UnsafeName id)
+        Nothing -> makeVar (UnsafeName id)
 
-identitySubst :: (forall n. Name n -> e n) -> Substitution e i i
-identitySubst f = UnsafeSubstitution f IntMap.empty
+identitySubst :: Substitution e i i
+identitySubst = UnsafeSubstitution IntMap.empty
 
 addSubst :: Substitution e i o -> NameBinder i i' -> e o -> Substitution e i' o
-addSubst (UnsafeSubstitution f env) (UnsafeNameBinder (UnsafeName id)) ex = UnsafeSubstitution f (IntMap.insert id ex env)
+addSubst !(UnsafeSubstitution env) (UnsafeNameBinder (UnsafeName id)) ex = UnsafeSubstitution (IntMap.insert id ex env)
 
-addRename :: Substitution e i o -> NameBinder i i' -> Name o -> Substitution e i' o
-addRename s@(UnsafeSubstitution f env) b@(UnsafeNameBinder (UnsafeName name1)) n@(UnsafeName name2)
-    | name1 == name2 = UnsafeSubstitution f (IntMap.delete name1 env)
-    | otherwise = addSubst s b (f n)
+addRename :: HasVar e => Substitution e i o -> NameBinder i i' -> Name o -> Substitution e i' o
+addRename !s@(UnsafeSubstitution env) b@(UnsafeNameBinder (UnsafeName name1)) n@(UnsafeName name2)
+    | name1 == name2 = UnsafeSubstitution (IntMap.delete name1 env)
+    | otherwise = addSubst s b (makeVar n)
 
 instance (Sinkable e) => Sinkable (Substitution e i) where
-  sinkabilityProof rename (UnsafeSubstitution f env) =
-    UnsafeSubstitution f (fmap (sinkabilityProof rename) env)
+  sinkabilityProof rename (UnsafeSubstitution env) =
+    UnsafeSubstitution (fmap (sinkabilityProof rename) env)
 
+instance HasVar Expr where
+  makeVar = VarE
 
 -- Substitute part
 substitute :: Distinct o => Scope o -> Substitution Expr i o -> Expr i -> Expr o
-substitute scope subst = \case
+substitute !scope !subst = \case
     VarE name -> lookupSubst subst name
-    AppE f x -> AppE (substitute scope subst f) (substitute scope subst x)
+    AppE f x -> (AppE (substitute scope subst f)) (substitute scope subst x)
     LamE binder body -> withRefreshed scope (nameOf binder) (\binder' ->
-        let subst' = addRename (sink subst) binder (nameOf binder')
-            scope' = extendScope binder' scope
+        let !subst' = addRename (sink subst) binder (nameOf binder')
+            !scope' = extendScope binder' scope
             body' = substitute scope' subst' body in LamE binder' body'
         )
 
 whnf :: Distinct n => Scope n -> Expr n -> Expr n
-whnf scope = \case
+whnf !scope = \case
   AppE fun arg ->
     case whnf scope fun of
       LamE binder body ->
-        let subst =  addSubst (identitySubst VarE) binder arg
+        let subst =  addSubst identitySubst binder arg
         in whnf scope (substitute scope subst body)
       fun' -> AppE fun' arg
   t -> t
 
 nf :: Distinct n => Scope n -> Expr n -> Expr n
-nf scope expr = case expr of
+nf !scope expr = case expr of
   LamE binder body -> unsafeAssertFresh binder \binder' ->
           let scope' = extendScope binder' scope
         in LamE binder' (nf scope' body)
   AppE fun arg ->
     case whnf scope fun of
       LamE binder body ->
-        let subst =  addSubst (identitySubst VarE ) binder arg
+        let subst =  addSubst identitySubst binder arg
         in nf scope (substitute scope subst body)
       fun' -> AppE (nf scope fun') (nf scope arg)
   t -> t
 
+nf_cbv :: Distinct n => Scope n -> Expr n -> Expr n
+nf_cbv !scope expr = case expr of
+  -- LamE binder body -> unsafeAssertFresh binder \binder' ->
+  --         let scope' = extendScope binder' scope
+  --       in LamE binder' (nf_cbv scope' body)
+  AppE fun arg -> do
+    let !fun' = nf_cbv scope fun
+        !arg' = nf_cbv scope arg
+    case fun' of
+      LamE binder body ->
+        let subst =  addSubst identitySubst binder arg'
+        in nf_cbv scope (substitute scope subst body)
+      fun' -> AppE fun' arg'
+  t -> t
+
 nfd :: Expr VoidS -> Expr VoidS
-nfd term = nf emptyScope term
+nfd term = nf_cbv emptyScope term
 
 toLambdaPi :: Distinct n => Scope n -> IntMap (Name n) -> LC.LC IdInt.IdInt -> Expr n
-toLambdaPi scope env = \case
+toLambdaPi !scope !env = \case
   LC.Var (IdInt.IdInt x) ->
     case IntMap.lookup x env of
       Just name -> VarE name
       Nothing -> error ("unbound variable: " ++ show x)
   LC.App fun arg ->
-    AppE (toLambdaPi scope env fun) (toLambdaPi scope env arg)
+    (AppE $! (toLambdaPi scope env fun)) $! (toLambdaPi scope env arg)
 
   LC.Lam (IdInt.IdInt x) body -> withFresh scope $ \binder ->
-    let scope' = extendScope binder scope
-        env' = IntMap.insert x (nameOf binder) (sink <$> env)
-    in LamE binder (toLambdaPi scope' env' body)
+    let !scope' = extendScope binder scope
+        !env' = IntMap.insert x (nameOf binder) (sink <$> env)
+    in LamE binder $! (toLambdaPi scope' env' body)
 
 
 
@@ -270,15 +294,15 @@ unsafeAeq
   -> Expr n
   -> Expr l
   -> Bool
-unsafeAeq subst1 subst2 target1 target2 (VarE (UnsafeName x)) (VarE (UnsafeName y))
+unsafeAeq !subst1 !subst2 !target1 !target2 (VarE (UnsafeName x)) (VarE (UnsafeName y))
   | IntSet.member x target1 = False
   | IntSet.member y target2 = False
   | otherwise = (unsafeRenameVar subst1 x) == (unsafeRenameVar subst2 y)
-unsafeAeq subst1 subst2 target1 target2 (AppE fun1 arg1) (AppE fun2 arg2)
+unsafeAeq !subst1 !subst2 !target1 !target2 (AppE fun1 arg1) (AppE fun2 arg2)
   = and
     [ unsafeAeq subst1 subst2 target1 target2 fun1 fun2
     , unsafeAeq subst1 subst2 target1 target2 arg1 arg2 ]
-unsafeAeq subst1 subst2 target1 target2
+unsafeAeq !subst1 !subst2 !target1 !target2
   (LamE binder1@(UnsafeNameBinder (UnsafeName name1)) body1)
   (LamE binder2@(UnsafeNameBinder (UnsafeName name2)) body2)
   | unsafeEquals binder1 binder2 = unsafeAeq subst1 subst2 target1 target2 body1 body2
@@ -294,7 +318,7 @@ unsafeAeq subst1 subst2 target1 target2
 unsafeAeq _ _ _ _ _ _ = False
 
 aeq_impl :: Expr n -> Expr n -> Bool
-aeq_impl = unsafeAeq IntMap.empty IntMap.empty IntSet.empty IntSet.empty
+aeq_impl = (==) -- unsafeAeq IntMap.empty IntMap.empty IntSet.empty IntSet.empty
 
 impl :: LambdaImpl.LambdaImpl
 impl =
