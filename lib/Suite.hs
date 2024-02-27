@@ -83,6 +83,7 @@ import qualified Unbound.UnboundNonGenerics
 --import qualified Unbound.UnboundRep
 import Util.Impl (LambdaImpl)
 import qualified Foil.Foil
+import qualified Foil.NBE
 import qualified Foil.Eager.Foil
 
 -- | Implementations used in the benchmarking/test suite
@@ -106,11 +107,11 @@ broken =
 all_impls :: [LambdaImpl]
 all_impls =
   freeScoped
-  ++ debruijn ++ debruijn_lazy
-  ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
-  ++ lennart
-  ++ unbound
-  ++ nbe
+  -- ++ debruijn ++ debruijn_lazy
+  -- ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
+  -- ++ lennart
+  -- ++ unbound
+  -- ++ nbe
 
 all_debruijn :: [LambdaImpl]
 all_debruijn = debruijn ++ debruijn_lazy
@@ -166,12 +167,14 @@ debruijn_lazy =
 
 freeScoped :: [LambdaImpl]
 freeScoped =
-  [ FreeScoped.Foil.impl,
-    FreeScoped.Nested.impl,
-    Foil.Foil.impl,
-    Foil.Eager.Foil.impl,
-    FreeScoped.Eager.Foil.impl,
-    FreeScoped.Eager.Nested.impl
+  [
+    -- FreeScoped.Foil.impl,
+    -- FreeScoped.Nested.impl,
+    Foil.NBE.impl,
+    -- Foil.Eager.Foil.impl,
+    -- FreeScoped.Eager.Foil.impl,
+    -- FreeScoped.Eager.Nested.impl
+    NBE.KovacsScoped.impl
   ]
 
 -- | Locally Nameless based implmentations

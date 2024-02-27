@@ -139,6 +139,7 @@ library
       FreeScoped.Foil
       FreeScoped.Nested
       Foil.Foil
+      Foil.NBE
       Foil.Eager.Foil
 
 
