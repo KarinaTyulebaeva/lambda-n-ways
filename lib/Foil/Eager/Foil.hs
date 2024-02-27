@@ -84,8 +84,8 @@ member (UnsafeName name) (UnsafeScope s) = rawMember name s
 
 data Expr n where
   VarE :: {-# UNPACK #-} !(Name n) -> Expr n
-  AppE :: !(Expr n) -> !(Expr n) -> Expr n
-  LamE :: !(NameBinder n l) -> !(Expr l) -> Expr n
+  AppE :: (Expr n) -> (Expr n) -> Expr n
+  LamE :: !(NameBinder n l) -> (Expr l) -> Expr n
 
 instance Eq (Expr n) where
   VarE x == VarE y = x == y
@@ -199,11 +199,11 @@ instance HasVar Expr where
 substitute :: Distinct o => Scope o -> Substitution Expr i o -> Expr i -> Expr o
 substitute !scope !subst = \case
     VarE name -> lookupSubst subst name
-    AppE f x -> (AppE (substitute scope subst f)) (substitute scope subst x)
+    AppE f x -> (AppE $! (substitute scope subst f)) $! (substitute scope subst x)
     LamE binder body -> withRefreshed scope (nameOf binder) (\binder' ->
         let !subst' = addRename (sink subst) binder (nameOf binder')
             !scope' = extendScope binder' scope
-            body' = substitute scope' subst' body in LamE binder' body'
+            !body' = substitute scope' subst' body in LamE binder' body'
         )
 
 whnf :: Distinct n => Scope n -> Expr n -> Expr n
@@ -212,20 +212,20 @@ whnf !scope = \case
     case whnf scope fun of
       LamE binder body ->
         let subst =  addSubst identitySubst binder arg
-        in whnf scope (substitute scope subst body)
+        in whnf scope $! (substitute scope subst body)
       fun' -> AppE fun' arg
   t -> t
 
 nf :: Distinct n => Scope n -> Expr n -> Expr n
 nf !scope expr = case expr of
   LamE binder body -> unsafeAssertFresh binder \binder' ->
-          let scope' = extendScope binder' scope
+          let !scope' = extendScope binder' scope
         in LamE binder' (nf scope' body)
   AppE fun arg ->
     case whnf scope fun of
       LamE binder body ->
-        let subst =  addSubst identitySubst binder arg
-        in nf scope (substitute scope subst body)
+        let !subst = addSubst identitySubst binder arg
+        in nf scope $! (substitute scope subst body)
       fun' -> AppE (nf scope fun') (nf scope arg)
   t -> t
 

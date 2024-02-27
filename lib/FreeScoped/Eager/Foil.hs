@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE KindSignatures #-}
@@ -87,9 +88,15 @@ member :: Name l -> Scope n -> Bool
 member (UnsafeName name) (UnsafeScope s) = rawMember name s
 
 data Expr n where
-  VarE :: !(Name n) -> Expr n
+  VarE :: {-# UNPACK #-} !(Name n) -> Expr n
   AppE :: Expr n -> Expr n -> Expr n
   LamE :: !(NameBinder n l) -> Expr l -> Expr n
+
+instance Eq (Expr n) where
+  VarE x == VarE y = x == y
+  AppE f1 x1 == AppE f2 x2 = (f1 == f2) && (x1 == x2)
+  LamE x1 body1 == LamE x2 body2 = (x1 == unsafeCoerce x2) && (unsafeCoerce body1 == body2)
+  _ == _ = False
 
 -- Distinct constraints
 class ExtEndo (n :: S)
@@ -189,8 +196,8 @@ instance (forall l. NFData (AST sig l)) => NFData (ScopedAST sig n) where
   rnf (ScopedAST binder body) = rnf binder `seq` rnf body
 
 data AST sig n where
-  Var :: !(Name n) -> AST sig n
-  Node :: !(sig (ScopedAST sig n) (AST sig n)) -> AST sig n
+  Var :: {-# UNPACK #-} !(Name n) -> AST sig n
+  Node :: {-# UNPACK #-} (sig (ScopedAST sig n) (AST sig n)) -> AST sig n
 
 deriving instance (forall scope term. (Generic scope, Generic term) => Generic (sig scope term)) => Generic (AST sig n)
 deriving instance (forall scope term. (NFData scope, NFData term) => NFData (sig scope term), forall scope term. (Generic scope, Generic term) => Generic (sig scope term)) => NFData (AST sig n)
@@ -211,21 +218,21 @@ substitute
   -> Substitution sig i o
   -> AST sig i
   -> AST sig o
-substitute scope subst = \case
+substitute !scope !subst = \case
   Var name -> lookupSubst subst name
-  Node node -> Node (bimap f (substitute scope subst) node)
+  Node node -> Node $! (bimap f (substitute scope subst) node)
   where
-    f (ScopedAST binder body) =
+    f !(ScopedAST binder body) =
       withRefreshed scope (nameOf binder) $ \binder' ->
-        let subst' = addRename (sink subst) binder (nameOf binder')
-            scope' = extendScope binder' scope
-            body' = substitute scope' subst' body
+        let !subst' = addRename (sink subst) binder (nameOf binder')
+            !scope' = extendScope binder' scope
+            !body' = substitute scope' subst' body
         in ScopedAST binder' body'
 
 data LambdaPiF scope term
-  = AppF !term !term
-  | LamF !scope
-  | PiF !term !scope
+  = AppF term term
+  | LamF scope
+  | PiF term scope
   deriving (Eq, Show, Functor, NFData, Generic)
 deriveBifunctor ''LambdaPiF
 
@@ -239,27 +246,33 @@ pattern Lam binder body = Node (LamF (ScopedAST binder body))
 
 {-# COMPLETE Var, App, Lam #-}
 
+instance Eq (LambdaPi n) where
+  Var x == Var y = x == y
+  App f1 x1 == App f2 x2 = (f1 == f2) && (x1 == x2)
+  Lam x1 body1 == Lam x2 body2 = (x1 == unsafeCoerce x2) && (unsafeCoerce body1 == body2)
+  _ == _ = False
+
 whnf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
-whnf scope = \case
+whnf !scope = \case
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->
-        let subst =  addSubst identitySubst binder arg
-        in whnf scope (substitute scope subst body)
+        let !subst =  addSubst identitySubst binder arg
+        in whnf scope $! (substitute scope subst body)
       fun' -> App fun' arg
   t -> t
 
 nf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
-nf scope = \case
+nf !scope = \case
   Lam binder body -> unsafeAssertFresh binder \binder' ->
-          let scope' = extendScope binder' scope
+          let !scope' = extendScope binder' scope
         in Lam binder' (nf scope' body)
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->
-        let subst =  addSubst identitySubst binder arg
-        in nf scope (substitute scope subst body)
-      fun' -> App (nf scope fun') (nf scope arg)
+        let !subst = addSubst identitySubst binder arg
+        in nf scope $! (substitute scope subst body)
+      fun' -> (App $! (nf scope fun')) $! (nf scope arg)
   t -> t
 
 nfd :: LambdaPi VoidS -> LambdaPi VoidS
@@ -300,32 +313,9 @@ fromLambdaPi = \case
     let UnsafeName id = nameOf binder
     in LC.Lam (IdInt.IdInt id) (fromLambdaPi body)
 
-two :: LambdaPi VoidS
-two = withFresh emptyScope
-  (\ s -> Lam s $ withFresh (extendScope s emptyScope)
-    (\ z -> Lam z (App (Var (sink (nameOf s)))
-                        (App (Var (sink (nameOf s)))
-                             (Var (nameOf z))))))
-
-appTwo = App two two
-
 toLC :: LambdaPi n -> LC.LC IdInt.IdInt
 toLC = fromLambdaPi
 
--- | A renaming of variables that keeps the same scope.
-newtype Renaming (n :: S) = Renaming (IntMap (Name n))
-instance Sinkable Renaming where
-   sinkabilityProof rename (Renaming value) = Renaming (fmap rename value)
-
-emptyRenaming :: Renaming VoidS
-emptyRenaming = Renaming IntMap.empty
-
-
--- | Rename variable using a renaming substitution.
-renameVar :: Renaming n -> Name n -> Name n
-renameVar (Renaming env) (UnsafeName id) = case IntMap.lookup id env of
-        Just ex -> ex
-        Nothing -> UnsafeName id
 
 -- Unsafe renaming of a raw name
 unsafeRenameVar :: IntMap RawName -> RawName -> RawName
@@ -398,7 +388,7 @@ unsafeAeq _ _ _ _ _ _ = False
 -- aeq _ _ _ _ _ _ = False
 
 aeq_impl :: LambdaPi n -> LambdaPi n -> Bool
-aeq_impl = unsafeAeq IntMap.empty IntMap.empty IntSet.empty IntSet.empty
+aeq_impl = (==)
 
 impl :: LambdaImpl.LambdaImpl
 impl =
