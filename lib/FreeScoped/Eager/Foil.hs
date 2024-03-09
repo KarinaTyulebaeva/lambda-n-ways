@@ -230,9 +230,9 @@ substitute !scope !subst = \case
         in ScopedAST binder' body'
 
 data LambdaPiF scope term
-  = AppF term term
-  | LamF scope
-  | PiF term scope
+  = AppF !term !term
+  | LamF !scope
+  | PiF !term !scope
   deriving (Eq, Show, Functor, NFData, Generic)
 deriveBifunctor ''LambdaPiF
 
@@ -266,7 +266,7 @@ nf :: Distinct n => Scope n -> LambdaPi n -> LambdaPi n
 nf !scope = \case
   Lam binder body -> unsafeAssertFresh binder \binder' ->
           let !scope' = extendScope binder' scope
-        in Lam binder' (nf scope' body)
+        in Lam binder' $! (nf scope' body)
   App fun arg ->
     case whnf scope fun of
       Lam binder body ->

@@ -85,6 +85,7 @@ import Util.Impl (LambdaImpl)
 import qualified Foil.Foil
 import qualified Foil.NBE
 import qualified Foil.Eager.Foil
+-- import qualified FreeScoped.NBE
 
 -- | Implementations used in the benchmarking/test suite
 -- must be a single variable name for Makefile
@@ -107,11 +108,7 @@ broken =
 all_impls :: [LambdaImpl]
 all_impls =
   freeScoped
-  -- ++ debruijn ++ debruijn_lazy
-  -- ++ locallyNameless ++ locallyNameless_lazy ++ named ++ named_lazy
-  -- ++ lennart
-  -- ++ unbound
-  -- ++ nbe
+   ++ comparison
 
 all_debruijn :: [LambdaImpl]
 all_debruijn = debruijn ++ debruijn_lazy
@@ -168,12 +165,32 @@ debruijn_lazy =
 freeScoped :: [LambdaImpl]
 freeScoped =
   [
-    -- FreeScoped.Foil.impl,
-    -- FreeScoped.Nested.impl,
+    FreeScoped.Foil.impl,
+    -- FreeScoped.NBE.impl,
+    FreeScoped.Nested.impl,
     Foil.NBE.impl,
-    -- Foil.Eager.Foil.impl,
-    -- FreeScoped.Eager.Foil.impl,
-    -- FreeScoped.Eager.Nested.impl
+    Foil.Eager.Foil.impl,
+    FreeScoped.Eager.Foil.impl,
+    -- FreeScoped.Eager.Nested.impl,
+    -- NBE.KovacsScoped.impl,
+    Named.Simple.impl
+  ]
+
+comparison :: [LambdaImpl]
+comparison =
+  [
+    LocallyNameless.Lazy.Ott.impl,
+    Named.Lennart.impl,
+    Named.Simple.impl,
+    DeBruijn.Lennart.impl,
+    DeBruijn.Lazy.Lennart.impl,
+    LocallyNameless.Ott.impl,
+    DeBruijn.Nested.impl,
+    DeBruijn.Lazy.Nested.impl,
+    Unbound.UnboundGenerics.impl, -- unbound-generics
+    Unbound.UnboundNonGenerics.impl, -- no generic programming
+    Named.Unique.impl,
+    NBE.Kovacs.impl,
     NBE.KovacsScoped.impl
   ]
 
