@@ -170,10 +170,9 @@ freeScoped =
     FreeScoped.Nested.impl,
     Foil.NBE.impl,
     Foil.Eager.Foil.impl,
+    Foil.Foil.impl,
     FreeScoped.Eager.Foil.impl,
-    -- FreeScoped.Eager.Nested.impl,
-    -- NBE.KovacsScoped.impl,
-    Named.Simple.impl
+    FreeScoped.Eager.Nested.impl
   ]
 
 comparison :: [LambdaImpl]
