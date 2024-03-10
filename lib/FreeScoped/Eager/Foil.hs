@@ -393,7 +393,7 @@ aeq_impl = (==)
 impl :: LambdaImpl.LambdaImpl
 impl =
   LambdaImpl.LambdaImpl
-    { LambdaImpl.impl_name = "FreeScoped.Eager.Foil",
+    { LambdaImpl.impl_name = "FreeScoped.Foil",
       LambdaImpl.impl_fromLC = fromLC,
       LambdaImpl.impl_toLC = toLC,
       LambdaImpl.impl_nf = nfd,

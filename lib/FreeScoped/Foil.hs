@@ -403,7 +403,7 @@ aeq_impl = unsafeAeq IntMap.empty IntMap.empty IntSet.empty IntSet.empty
 impl :: LambdaImpl.LambdaImpl
 impl =
   LambdaImpl.LambdaImpl
-    { LambdaImpl.impl_name = "FreeScoped.Foil",
+    { LambdaImpl.impl_name = "FreeScoped.Lazy.Foil",
       LambdaImpl.impl_fromLC = fromLC,
       LambdaImpl.impl_toLC = toLC,
       LambdaImpl.impl_nf = nfd,
