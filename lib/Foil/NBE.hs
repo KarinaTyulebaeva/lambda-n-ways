@@ -252,7 +252,7 @@ whnfd :: Expr VoidS -> Expr VoidS
 whnfd = whnf emptyScope
 
 eval :: Substitution Expr i o -> Expr i -> Expr o
-eval env = \case
+eval !env = \case
   VarE x -> lookupSubst env x
   AppE f x ->
     case eval env f of
